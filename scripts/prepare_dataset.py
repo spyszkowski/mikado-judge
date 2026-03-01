@@ -103,7 +103,7 @@ def write_dataset_yaml(output_dir: Path, classes_yaml: Path | None) -> None:
         names = data.get("names", names)
 
     dataset_yaml = {
-        "path": str(output_dir.resolve()),
+        "path": ".",
         "train": "images/train",
         "val": "images/val",
         "nc": len(names),
