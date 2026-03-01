@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pip install -e . --quiet)",
+      "Bash(python -m pytest tests/test_utils.py tests/test_judge.py tests/test_track.py -v)",
+      "Bash(pip install pytest --quiet)",
+      "Bash(python -m pytest tests/ -v)",
+      "Bash(python -m pytest tests/ -v --tb=short)"
+    ],
+    "additionalDirectories": [
+      "c:\\Users\\spyszkowski\\.claude\\projects\\c--Users-spyszkowski-Workspaces-experiments-mikado-judge\\memory"
+    ]
+  }
+}
