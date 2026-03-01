@@ -1,0 +1,31 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mikado-judge"
+version = "0.1.0"
+description = "Computer vision judge for the Mikado (pick-up sticks) board game"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "ultralytics>=8.3.0",
+    "opencv-python>=4.9.0",
+    "numpy>=1.26.0",
+    "scipy>=1.12.0",
+    "pyyaml>=6.0.1",
+    "mediapipe>=0.10.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-cov>=5.0.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mikado"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-v"

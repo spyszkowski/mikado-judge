@@ -1,0 +1,18 @@
+# Dataset configuration for Google Colab training.
+# Paths point to Google Drive mount locations.
+# Adjust DRIVE_ROOT to match your Drive structure.
+
+# Google Drive root (set this to your mounted Drive path)
+# In Colab: /content/drive/MyDrive/mikado-judge
+path: /content/drive/MyDrive/mikado-judge/datasets/mikado
+
+train: images/train
+val: images/val
+
+nc: 5
+names:
+  0: mikado
+  1: blue
+  2: red
+  3: yellow
+  4: green

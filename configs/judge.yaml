@@ -1,0 +1,24 @@
+# Movement detection thresholds — TUNE THESE
+movement:
+  centroid_displacement_px: 8    # pixels — flag if stick moved more than this
+  angle_change_deg: 1.5          # degrees — flag if stick rotated more than this
+  iou_threshold: 0.85            # flag if IoU between before/after OBB drops below this
+
+# Stick matching parameters
+matching:
+  max_centroid_distance_px: 50   # don't match sticks further apart than this
+  centroid_weight: 0.4           # weight in cost matrix
+  angle_weight: 0.3
+  class_weight: 0.3
+
+# Frame alignment
+alignment:
+  min_features: 20               # minimum ORB features for reliable alignment
+  ransac_threshold: 5.0          # RANSAC reprojection threshold
+  warn_if_features_below: 50     # warn user about camera instability
+
+# Detection
+detection:
+  confidence_threshold: 0.3      # YOLO confidence threshold
+  iou_nms_threshold: 0.5         # NMS IoU threshold (for YOLO11, not needed for YOLO26)
+  input_size: 640                # inference image size

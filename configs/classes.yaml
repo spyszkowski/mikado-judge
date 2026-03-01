@@ -1,0 +1,27 @@
+# Define your Mikado stick classes here.
+# Adjust to match your physical set.
+names:
+  0: mikado
+  1: blue
+  2: red
+  3: yellow
+  4: green
+
+# Point values per class
+points:
+  mikado: 20
+  blue: 10
+  red: 5
+  yellow: 2
+  green: 3
+
+# Thickness in pixels for OBB generation from polyline annotations.
+# Adjust if camera distance or resolution changes.
+# Calibrated for 1280x720 resolution at ~50cm camera distance.
+thickness_px:
+  mikado: 28    # mikado stick is slightly thicker
+  blue: 28
+  red: 28
+  yellow: 28
+  green: 28
+  default: 28

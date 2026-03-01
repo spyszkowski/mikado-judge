@@ -205,3 +205,15 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Mikado Judge — project-specific
+*.pt
+*.pth
+*.onnx
+*.engine
+data/
+datasets/
+runs/
+frames/
+recordings/
+logs/

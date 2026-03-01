@@ -1,0 +1,15 @@
+# Dataset configuration for local inference / evaluation.
+# Adjust 'path' to point to your local dataset directory.
+
+path: ./datasets/mikado
+
+train: images/train
+val: images/val
+
+nc: 5
+names:
+  0: mikado
+  1: blue
+  2: red
+  3: yellow
+  4: green
