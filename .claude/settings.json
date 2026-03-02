@@ -5,7 +5,12 @@
       "Bash(python -m pytest tests/test_utils.py tests/test_judge.py tests/test_track.py -v)",
       "Bash(pip install pytest --quiet)",
       "Bash(python -m pytest tests/ -v)",
-      "Bash(python -m pytest tests/ -v --tb=short)"
+      "Bash(python -m pytest tests/ -v --tb=short)",
+      "Bash(python -c \"import ultralytics; print\\(ultralytics.__file__\\)\")",
+      "Read(//c/Users/spyszkowski/AppData/Roaming/Python/Python313/site-packages/ultralytics/**)",
+      "Bash(xargs grep -l \"obb\\\\|OBB\")",
+      "Bash(python3 -c \":*)",
+      "Bash(python -c \":*)"
     ],
     "additionalDirectories": [
       "c:\\Users\\spyszkowski\\.claude\\projects\\c--Users-spyszkowski-Workspaces-experiments-mikado-judge\\memory"
