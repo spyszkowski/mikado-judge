@@ -333,8 +333,8 @@ def main() -> None:
     parser.add_argument("--output", required=True, help="Output dataset directory")
     parser.add_argument("--crop-size", type=int, default=1280)
     parser.add_argument("--overlap", type=float, default=0.3)
-    parser.add_argument("--min-stick-length", type=float, default=0.3,
-                        help="Min visible fraction to keep annotation (default: 0.3)")
+    parser.add_argument("--min-stick-length", type=float, default=0.15,
+                        help="Min visible fraction to keep annotation (default: 0.15)")
     parser.add_argument("--val-images", default=None)
     parser.add_argument("--val-labels", default=None)
     parser.add_argument("--classes", default="configs/classes.yaml")
