@@ -163,10 +163,10 @@ def _clip_obb_to_tile(
     local[:, 0] -= tile_x
     local[:, 1] -= tile_y
 
-    # Quick reject: centroid far outside tile
-    cx = local[:, 0].mean()
-    cy = local[:, 1].mean()
-    if cx < -crop_w * 0.1 or cx > crop_w * 1.1 or cy < -crop_h * 0.1 or cy > crop_h * 1.1:
+    # Quick reject: if ALL corners are on the same side of a tile edge,
+    # the stick can't intersect the tile at all.
+    if (local[:, 0].max() < 0 or local[:, 0].min() > crop_w or
+            local[:, 1].max() < 0 or local[:, 1].min() > crop_h):
         return None
 
     # Get original OBB axes and width before clipping
