@@ -62,85 +62,51 @@ def _clip_obb_to_tile(
 ) -> Optional[str]:
     """Clip an OBB annotation to a tile region.
 
-    Transforms corners to tile-local coords, clips the stick centerline,
-    rebuilds the OBB, and returns a YOLO-OBB label line or None.
+    Simple approach: if the OBB centroid falls inside the tile, keep it.
+    Transform corners to tile-local coordinates and clamp to tile bounds.
+    This preserves the original OBB shape without distortion.
     """
+    # Transform to tile-local pixel coords
     local = corners_px.copy()
     local[:, 0] -= tile_x
     local[:, 1] -= tile_y
 
-    # Identify short and long edges
-    edges = []
+    # Centroid of the 4 corners
+    cx = local[:, 0].mean()
+    cy = local[:, 1].mean()
+
+    # Skip if centroid is outside the tile
+    if cx < 0 or cx > crop_w or cy < 0 or cy > crop_h:
+        return None
+
+    # Check how much of the stick is inside the tile.
+    # Use the fraction of corners inside as a quick proxy.
+    inside = np.sum(
+        (local[:, 0] >= 0) & (local[:, 0] <= crop_w) &
+        (local[:, 1] >= 0) & (local[:, 1] <= crop_h)
+    )
+    # If fewer than 2 corners inside and min_length_frac > 0.5, skip
+    if inside < 2 and min_length_frac > 0.5:
+        return None
+
+    # Clamp corners to tile bounds
+    local[:, 0] = np.clip(local[:, 0], 0.0, float(crop_w))
+    local[:, 1] = np.clip(local[:, 1], 0.0, float(crop_h))
+
+    # Normalize to [0,1]
+    local[:, 0] /= crop_w
+    local[:, 1] /= crop_h
+
+    # Reject degenerate (collapsed to a point or line after clamping)
+    edge_lens = []
     for i in range(4):
         j = (i + 1) % 4
-        d = np.linalg.norm(local[j] - local[i])
-        edges.append((d, i, j))
-    edges.sort(key=lambda e: e[0])
-
-    # Short edges midpoints = stick endpoints
-    mid1 = (local[edges[0][1]] + local[edges[0][2]]) / 2
-    mid2 = (local[edges[1][1]] + local[edges[1][2]]) / 2
-    full_length = np.linalg.norm(mid2 - mid1)
-
-    # Parametric line clipping: P = mid1 + t*(mid2 - mid1), t in [0,1]
-    d = mid2 - mid1
-    t_min, t_max = 0.0, 1.0
-
-    for axis in (0, 1):
-        lo, hi = 0.0, float(crop_w if axis == 0 else crop_h)
-        if abs(d[axis]) < 1e-9:
-            if mid1[axis] < lo or mid1[axis] > hi:
-                return None
-        else:
-            t1 = (lo - mid1[axis]) / d[axis]
-            t2 = (hi - mid1[axis]) / d[axis]
-            if t1 > t2:
-                t1, t2 = t2, t1
-            t_min = max(t_min, t1)
-            t_max = min(t_max, t2)
-
-    if t_min >= t_max:
+        edge_lens.append(np.linalg.norm(local[j] - local[i]))
+    edge_lens.sort()
+    if edge_lens[0] < 1e-6 or edge_lens[2] < 0.005:
         return None
 
-    visible_frac = t_max - t_min
-    if visible_frac < min_length_frac:
-        return None
-
-    # Clipped centerline endpoints
-    p1 = mid1 + t_min * d
-    p2 = mid1 + t_max * d
-
-    # Rebuild OBB from clipped centerline + original half-thickness
-    half_thick = (edges[0][0] + edges[1][0]) / 4
-    dx, dy = p2[0] - p1[0], p2[1] - p1[1]
-    length = math.sqrt(dx * dx + dy * dy)
-    if length < 1:
-        return None
-
-    px = -dy / length * half_thick
-    py = dx / length * half_thick
-
-    clipped = np.array([
-        [p1[0] - px, p1[1] + py],
-        [p1[0] + px, p1[1] - py],
-        [p2[0] + px, p2[1] - py],
-        [p2[0] - px, p2[1] + py],
-    ])
-
-    # Normalize to [0,1] and clamp
-    clipped[:, 0] = np.clip(clipped[:, 0] / crop_w, 0.0, 1.0)
-    clipped[:, 1] = np.clip(clipped[:, 1] / crop_h, 0.0, 1.0)
-
-    # Reject degenerate
-    ce = []
-    for i in range(4):
-        j = (i + 1) % 4
-        ce.append(np.linalg.norm(clipped[j] - clipped[i]))
-    ce.sort()
-    if ce[0] < 1e-6 or ce[2] < 0.01:
-        return None
-
-    coords_str = " ".join(f"{clipped[i, 0]:.6f} {clipped[i, 1]:.6f}" for i in range(4))
+    coords_str = " ".join(f"{local[i, 0]:.6f} {local[i, 1]:.6f}" for i in range(4))
     return f"{class_id} {coords_str}"
 
 
