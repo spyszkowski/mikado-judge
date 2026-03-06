@@ -17,7 +17,7 @@ points:
 
 # Thickness in pixels for OBB generation from polyline annotations.
 # Adjust if camera distance or resolution changes.
-# Calibrated for 1280x720 resolution at ~50cm camera distance.
+# Calibrated for 4624x3472 images at ~50cm camera distance.
 thickness_px:
   mikado: 28    # mikado stick is slightly thicker
   blue: 28

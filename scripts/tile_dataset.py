@@ -197,7 +197,9 @@ def _clip_obb_to_tile(
     if clipped_length < 2.0:
         return None
 
-    # Reconstruct OBB: use original width, clipped length, original orientation
+    # Reconstruct OBB: use original width, clipped length, original orientation.
+    # The center is placed at the midpoint of the clipped region along the
+    # stick's long axis, preserving exact position alignment with the image.
     center_t = (t_min + t_max) / 2
     center_p = (clip_perp_projs.min() + clip_perp_projs.max()) / 2
 
@@ -205,47 +207,25 @@ def _clip_obb_to_tile(
     half_len = clipped_length / 2
     half_wid = orig_width / 2
 
-    # Build the 4 corners, then nudge the center inward so all corners
-    # stay within [0, crop_w] x [0, crop_h].  This avoids both:
-    #  - clamping (which collapses width)
-    #  - coords outside [0,1] (which some YOLO loaders reject)
-    # The positional shift is at most half_wid (~14px), negligible for training.
-    def _build_box(c):
-        return np.array([
-            c - half_len * long_dir - half_wid * perp_dir,
-            c - half_len * long_dir + half_wid * perp_dir,
-            c + half_len * long_dir + half_wid * perp_dir,
-            c + half_len * long_dir - half_wid * perp_dir,
-        ])
+    box = np.array([
+        center - half_len * long_dir - half_wid * perp_dir,
+        center - half_len * long_dir + half_wid * perp_dir,
+        center + half_len * long_dir + half_wid * perp_dir,
+        center + half_len * long_dir - half_wid * perp_dir,
+    ])
 
-    box = _build_box(center)
-
-    # Compute how far each edge overflows and shift center to fix
-    x_min_overflow = -box[:, 0].min()          # positive if box goes left of 0
-    x_max_overflow = box[:, 0].max() - crop_w  # positive if box goes right of crop_w
-    y_min_overflow = -box[:, 1].min()
-    y_max_overflow = box[:, 1].max() - crop_h
-
-    shift = np.zeros(2)
-    if x_min_overflow > 0:
-        shift[0] += x_min_overflow
-    if x_max_overflow > 0:
-        shift[0] -= x_max_overflow
-    if y_min_overflow > 0:
-        shift[1] += y_min_overflow
-    if y_max_overflow > 0:
-        shift[1] -= y_max_overflow
-
-    if shift[0] != 0 or shift[1] != 0:
-        box = _build_box(center + shift)
-
-    # Final clamp for floating-point safety (shift should have fixed it)
-    box[:, 0] = np.clip(box[:, 0], 0.0, float(crop_w))
-    box[:, 1] = np.clip(box[:, 1], 0.0, float(crop_h))
-
-    # Normalize to [0,1]
+    # Normalize to [0,1].
     box[:, 0] /= crop_w
     box[:, 1] /= crop_h
+
+    # Ultralytics verify_image_label rejects entire images if any label's
+    # axis-aligned bounding box exceeds [-0.01, 1.01]. Clamp corners to
+    # exactly [0, 1] — the clamp only affects corners at tile edges where
+    # the stick width extends ~14px past the boundary. For the edge that
+    # gets clamped, the visible difference is < half the stick width.
+    # The opposite edge (inside the tile) stays correct, and the angle
+    # and long-axis position are preserved exactly.
+    box = np.clip(box, 0.0, 1.0)
 
     coords_str = " ".join(f"{box[i, 0]:.6f} {box[i, 1]:.6f}" for i in range(4))
     return f"{class_id} {coords_str}"
