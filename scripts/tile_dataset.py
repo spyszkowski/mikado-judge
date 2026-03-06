@@ -19,9 +19,10 @@ Usage:
 Each 4624x3472 image produces ~20 tiles (5x4 grid with 30% overlap).
 68 images -> ~1360 tiles. Sticks are 3.5x wider = dramatically easier to detect.
 
-Annotations are clipped to each tile. Sticks that are mostly outside a tile
-(less than min-stick-length fraction visible) are dropped to avoid teaching
-the model to detect tiny stick fragments.
+Annotations are clipped to each tile using Sutherland-Hodgman polygon clipping,
+then a minimum-area rotated rectangle is fitted to the clipped polygon.
+Sticks that are mostly outside a tile (less than min-stick-length fraction visible)
+are dropped to avoid teaching the model to detect tiny stick fragments.
 
 Rollback: git reset --hard v2-before-tiling
 """
@@ -30,7 +31,6 @@ from __future__ import annotations
 
 import argparse
 import logging
-import math
 from pathlib import Path
 from typing import Optional
 
@@ -51,6 +51,95 @@ def _parse_obb_line(line: str) -> Optional[tuple[int, np.ndarray]]:
     return class_id, coords
 
 
+def _sutherland_hodgman(subject: np.ndarray, clip_rect: tuple[float, float, float, float]) -> np.ndarray:
+    """Clip a polygon against a rectangle using Sutherland-Hodgman algorithm.
+
+    Args:
+        subject: polygon vertices (N, 2)
+        clip_rect: (x_min, y_min, x_max, y_max)
+
+    Returns:
+        Clipped polygon vertices (M, 2). May be empty if fully outside.
+    """
+    x_min, y_min, x_max, y_max = clip_rect
+
+    # Each edge of the clip rectangle defined as (inside_test, intersect_func)
+    def _clip_edge(poly: list, inside, intersect):
+        if not poly:
+            return []
+        output = []
+        prev = poly[-1]
+        prev_inside = inside(prev)
+        for curr in poly:
+            curr_inside = inside(curr)
+            if curr_inside:
+                if not prev_inside:
+                    output.append(intersect(prev, curr))
+                output.append(curr)
+            elif prev_inside:
+                output.append(intersect(prev, curr))
+            prev = curr
+            prev_inside = curr_inside
+        return output
+
+    def _lerp(a, b, t):
+        return (a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1]))
+
+    # Left edge: x >= x_min
+    def left_inside(p): return p[0] >= x_min
+    def left_intersect(a, b):
+        t = (x_min - a[0]) / (b[0] - a[0]) if b[0] != a[0] else 0.0
+        return _lerp(a, b, t)
+
+    # Right edge: x <= x_max
+    def right_inside(p): return p[0] <= x_max
+    def right_intersect(a, b):
+        t = (x_max - a[0]) / (b[0] - a[0]) if b[0] != a[0] else 0.0
+        return _lerp(a, b, t)
+
+    # Bottom edge: y >= y_min
+    def bottom_inside(p): return p[1] >= y_min
+    def bottom_intersect(a, b):
+        t = (y_min - a[1]) / (b[1] - a[1]) if b[1] != a[1] else 0.0
+        return _lerp(a, b, t)
+
+    # Top edge: y <= y_max
+    def top_inside(p): return p[1] <= y_max
+    def top_intersect(a, b):
+        t = (y_max - a[1]) / (b[1] - a[1]) if b[1] != a[1] else 0.0
+        return _lerp(a, b, t)
+
+    poly = [(p[0], p[1]) for p in subject]
+    poly = _clip_edge(poly, left_inside, left_intersect)
+    poly = _clip_edge(poly, right_inside, right_intersect)
+    poly = _clip_edge(poly, bottom_inside, bottom_intersect)
+    poly = _clip_edge(poly, top_inside, top_intersect)
+
+    if not poly:
+        return np.empty((0, 2), dtype=np.float64)
+    return np.array(poly, dtype=np.float64)
+
+
+def _min_area_rect(points: np.ndarray) -> Optional[np.ndarray]:
+    """Compute minimum-area rotated rectangle around a set of points.
+
+    Returns 4 corners as (4, 2) array, or None if degenerate.
+    """
+    if len(points) < 3:
+        return None
+
+    pts_f32 = points.astype(np.float32)
+    rect = cv2.minAreaRect(pts_f32)
+    box = cv2.boxPoints(rect)
+
+    # Check for degenerate rectangle
+    w, h = rect[1]
+    if w < 1e-3 or h < 1e-3:
+        return None
+
+    return box.astype(np.float64)
+
+
 def _clip_obb_to_tile(
     class_id: int,
     corners_px: np.ndarray,
@@ -62,51 +151,63 @@ def _clip_obb_to_tile(
 ) -> Optional[str]:
     """Clip an OBB annotation to a tile region.
 
-    Simple approach: if the OBB centroid falls inside the tile, keep it.
-    Transform corners to tile-local coordinates and clamp to tile bounds.
-    This preserves the original OBB shape without distortion.
+    Uses Sutherland-Hodgman polygon clipping to properly clip the OBB against
+    the tile boundary, then fits a minimum-area rotated rectangle to the
+    clipped polygon. This preserves correct width and angle even when the
+    stick crosses tile edges.
     """
     # Transform to tile-local pixel coords
     local = corners_px.copy()
     local[:, 0] -= tile_x
     local[:, 1] -= tile_y
 
-    # Centroid of the 4 corners
+    # Quick check: if centroid is far outside, skip
     cx = local[:, 0].mean()
     cy = local[:, 1].mean()
-
-    # Skip if centroid is outside the tile
-    if cx < 0 or cx > crop_w or cy < 0 or cy > crop_h:
+    if cx < -crop_w * 0.1 or cx > crop_w * 1.1 or cy < -crop_h * 0.1 or cy > crop_h * 1.1:
         return None
 
-    # Check how much of the stick is inside the tile.
-    # Use the fraction of corners inside as a quick proxy.
-    inside = np.sum(
-        (local[:, 0] >= 0) & (local[:, 0] <= crop_w) &
-        (local[:, 1] >= 0) & (local[:, 1] <= crop_h)
-    )
-    # If fewer than 2 corners inside and min_length_frac > 0.5, skip
-    if inside < 2 and min_length_frac > 0.5:
+    # Check what fraction of the original stick length is inside the tile.
+    # Compute original stick length (max diagonal of the OBB = the long axis).
+    orig_diags = [
+        np.linalg.norm(local[0] - local[2]),
+        np.linalg.norm(local[1] - local[3]),
+    ]
+    orig_length = max(orig_diags)
+
+    # Clip the OBB polygon against the tile rectangle
+    clip_rect = (0.0, 0.0, float(crop_w), float(crop_h))
+    clipped = _sutherland_hodgman(local, clip_rect)
+
+    if len(clipped) < 3:
         return None
 
-    # Clamp corners to tile bounds
-    local[:, 0] = np.clip(local[:, 0], 0.0, float(crop_w))
-    local[:, 1] = np.clip(local[:, 1], 0.0, float(crop_h))
+    # Fit minimum-area rotated rectangle to the clipped polygon
+    box = _min_area_rect(clipped)
+    if box is None:
+        return None
+
+    # Check the clipped stick retains enough length
+    edges = [np.linalg.norm(box[(i + 1) % 4] - box[i]) for i in range(4)]
+    edges.sort()
+    clipped_length = max(edges[2], edges[3])  # long edge
+    clipped_width = min(edges[0], edges[1])    # short edge
+
+    if orig_length > 0 and (clipped_length / orig_length) < min_length_frac:
+        return None
+
+    # Reject if too thin (degenerate after clipping)
+    if clipped_width < 2.0:  # less than 2px wide
+        return None
 
     # Normalize to [0,1]
-    local[:, 0] /= crop_w
-    local[:, 1] /= crop_h
+    box[:, 0] /= crop_w
+    box[:, 1] /= crop_h
 
-    # Reject degenerate (collapsed to a point or line after clamping)
-    edge_lens = []
-    for i in range(4):
-        j = (i + 1) % 4
-        edge_lens.append(np.linalg.norm(local[j] - local[i]))
-    edge_lens.sort()
-    if edge_lens[0] < 1e-6 or edge_lens[2] < 0.005:
-        return None
+    # Clamp to [0, 1] for safety (floating point)
+    box = np.clip(box, 0.0, 1.0)
 
-    coords_str = " ".join(f"{local[i, 0]:.6f} {local[i, 1]:.6f}" for i in range(4))
+    coords_str = " ".join(f"{box[i, 0]:.6f} {box[i, 1]:.6f}" for i in range(4))
     return f"{class_id} {coords_str}"
 
 
