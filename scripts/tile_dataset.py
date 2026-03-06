@@ -205,18 +205,45 @@ def _clip_obb_to_tile(
     half_len = clipped_length / 2
     half_wid = orig_width / 2
 
-    # 4 corners preserving original width
-    box = np.array([
-        center - half_len * long_dir - half_wid * perp_dir,
-        center - half_len * long_dir + half_wid * perp_dir,
-        center + half_len * long_dir + half_wid * perp_dir,
-        center + half_len * long_dir - half_wid * perp_dir,
-    ])
+    # Build the 4 corners, then nudge the center inward so all corners
+    # stay within [0, crop_w] x [0, crop_h].  This avoids both:
+    #  - clamping (which collapses width)
+    #  - coords outside [0,1] (which some YOLO loaders reject)
+    # The positional shift is at most half_wid (~14px), negligible for training.
+    def _build_box(c):
+        return np.array([
+            c - half_len * long_dir - half_wid * perp_dir,
+            c - half_len * long_dir + half_wid * perp_dir,
+            c + half_len * long_dir + half_wid * perp_dir,
+            c + half_len * long_dir - half_wid * perp_dir,
+        ])
 
-    # Normalize to [0,1]. The reconstructed OBB may slightly exceed tile bounds
-    # where the original width extends past the clip boundary (typically <2%).
-    # Do NOT clamp — clamping collapses the short edge and destroys width.
-    # YOLO-OBB handles coordinates slightly outside [0,1] without issues.
+    box = _build_box(center)
+
+    # Compute how far each edge overflows and shift center to fix
+    x_min_overflow = -box[:, 0].min()          # positive if box goes left of 0
+    x_max_overflow = box[:, 0].max() - crop_w  # positive if box goes right of crop_w
+    y_min_overflow = -box[:, 1].min()
+    y_max_overflow = box[:, 1].max() - crop_h
+
+    shift = np.zeros(2)
+    if x_min_overflow > 0:
+        shift[0] += x_min_overflow
+    if x_max_overflow > 0:
+        shift[0] -= x_max_overflow
+    if y_min_overflow > 0:
+        shift[1] += y_min_overflow
+    if y_max_overflow > 0:
+        shift[1] -= y_max_overflow
+
+    if shift[0] != 0 or shift[1] != 0:
+        box = _build_box(center + shift)
+
+    # Final clamp for floating-point safety (shift should have fixed it)
+    box[:, 0] = np.clip(box[:, 0], 0.0, float(crop_w))
+    box[:, 1] = np.clip(box[:, 1], 0.0, float(crop_h))
+
+    # Normalize to [0,1]
     box[:, 0] /= crop_w
     box[:, 1] /= crop_h
 
